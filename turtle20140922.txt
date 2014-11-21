@@ -1,0 +1,379 @@
+Params
+    Numeric RiskRatio(1);                   // % Risk Per N ( 0 - 100)
+    Numeric ATRLength(20);                  // ?13????3￠??¨?‘¨??? ATR Length
+    Numeric boLength(20);                   // ??-?‘¨??? BreakOut Length
+    Numeric fsLength(55);                   // é???‘¨??? FailSafe Length
+    Numeric teLength(10);                   // ?|?????‘¨??? Trailing Exit Length
+    Bool LastProfitableTradeFilter(True);   // ????”¨?…￥???è????¤??????
+	numeric ReEntryLimit(4);
+	string FileFolder("C:\\TBLog");
+Vars
+	Numeric MinPoint;                       // ??€?°??????¨??????
+	NumericSeries AvgTR;					// ATR
+    Numeric N;                              // N ?€?
+    Numeric TotalEquity;                    // ??‰??€?–°?”??????·è????—??o????€?èμ??o§
+    Numeric TurtleUnits;                    // ?o¤??“??????
+    NumericSeries DonchianHi;              	// ?”??￥???‰é€?é?“???è?¨?????????1??aBar
+    NumericSeries DonchianLo;              	// ?”??￥???‰é€?é?“???è?¨?????????1??aBar
+    NumericSeries fsDonchianHi;            	// ?”??￥???‰é€?é?“???è?¨?????????1??aBar???é???‘¨???
+    NumericSeries fsDonchianLo;            	// ?”??￥???‰é€?é?“???è?¨?????????1??aBar???é???‘¨???
+    Numeric ExitHighestPrice;               // ?|?????—???¤?–-é?€è|????N?‘¨?????€é????·
+    Numeric ExitLowestPrice;                // ?|?????—???¤?–-é?€è|????N?‘¨?????€?????·
+    Numeric myEntryPrice;                   // ??€??“??·? ?
+    Numeric myExitPrice;                    // ?13??“??·? ?
+    Bool SendOrderThisBar(False); 	
+	Bool PreBreakoutFailure;
+	Numeric PreEntryPrice(0);
+	Numeric AvgCostPrice;
+	String LogPath;
+	String ParamPath;
+	String Temp;
+	Numeric i;
+	Numeric EntryNumber;
+	Bool ExistOpenOrder;
+	bool ExistOpenPosition;
+	bool DeleteOrderSuccess;
+	bool NoPosition(false);
+	bool LongPosition(false);
+	bool ShortPosition(false);
+	Numeric MaxSlippage;
+Begin
+    If(BarStatus == 0)
+    {
+		PreEntryPrice = InvalidNumeric;
+		PreBreakoutFailure = false;
+	}	
+	
+	MinPoint = MinMove*PriceScale;
+    AvgTR = XAverage(TrueRange,ATRLength);
+	N = AvgTR[1];	
+	MaxSlippage = 0.05*N;
+    TotalEquity = A_CurrentEquity();
+    TurtleUnits = (TotalEquity*RiskRatio/100) /(N * ContractUnit()*BigPointValue());
+    TurtleUnits = IntPart(TurtleUnits); 
+	
+    DonchianHi = HighestFC(High[1],boLength);
+    DonchianLo = LowestFC(Low[1],boLength);
+
+	fsDonchianHi = HighestFC(High[1],fsLength);
+    fsDonchianLo = LowestFC(Low[1],fsLength);
+	
+	ExitLowestPrice = LowestFC(Low[1],teLength);
+	ExitHighestPrice = HighestFC(High[1],teLength);
+	
+	LogPath = FileFolder + "\\TBLog_" + Symbol() + "_" +SymbolName() + "_" + Text(CurrentDate()) + ".csv";
+	ParamPath = FileFolder + "\\TurtleSetup.csv";
+	
+	if(InvalidString == GetTBProfileString2File(ParamPath, Symbol(), "PreEntryPrice"))
+	{
+		PreEntryPrice = 0;
+		SetTBProfileString2File(ParamPath, Symbol(), "PreEntryPrice", text(0));
+		Alert("Reset PreEntryPrice = 0, "+SymbolName());
+		FileAppend(LogPath, "Reset PreEntryPrice = 0") ;
+	}
+	else
+	{
+		PreEntryPrice = Value(GetTBProfileString2File(ParamPath, Symbol(), "PreEntryPrice"));
+	}
+	
+	if(InvalidString == GetTBProfileString2File(ParamPath, Symbol(), "EntryNumber"))
+	{
+		SetTBProfileString2File(ParamPath, Symbol(), "EntryNumber", text(0));
+		Alert("Reset EntryNumber = 0");
+		FileAppend(LogPath, "Reset EntryNumber = 0") ;
+	}
+	Else
+	{
+		EntryNumber = Value(GetTBProfileString2File(ParamPath, Symbol(), "EntryNumber"));
+	}
+	
+	if ("True" == GetTBProfileString2File(ParamPath, Symbol(), "PreBreakoutFailure"))
+	{
+		PreBreakoutFailure = True;
+	}
+	else if ("False" == GetTBProfileString2File(ParamPath, Symbol(), "PreBreakoutFailure"))
+	{
+		PreBreakoutFailure = False;
+	} 
+	Else
+	{
+		SetTBProfileString2File(ParamPath, Symbol(), "PreBreakoutFailure", "False");
+		Alert("Reset PreBreakoutFailure = False, "+SymbolName());
+		FileAppend(LogPath, "Reset PreBreakoutFailure = False") ;
+	}
+	
+	if (InvalidInteger == A_GetOpenOrderCount() or 0 == A_GetOpenOrderCount())
+	{
+		ExistOpenOrder = False;
+	}
+	else
+	{
+		ExistOpenOrder = True;
+	}
+	
+	If (Not CanTrade() )
+	{
+		FileAppend(LogPath, "CanNotTrade") ;
+	}
+	Else If(A_AccountID() == "")
+	{
+		FileAppend(LogPath, "AccountNotLogin");
+	}	
+	else 
+	{
+		FileAppend(LogPath, 
+			"DateTime = " + Text(CurrentDate() + CurrentTime()) +
+			", Open = " + Text(Open) +
+			", High = " + Text(High) +
+			", Low = " + Text(Low) +
+			", Close = " + Text(Close) +
+			", N = " + Text(N) +
+			", MinPoint = " + Text(MinPoint) +
+			", ContractUnit = " + Text(ContractUnit()) +
+			", BigPointValue = " + Text(BigPointValue()) +
+			", TotalEquity = " + Text(TotalEquity) +
+			", TurtleUnits = " + Text(TurtleUnits) +
+			", DonchianHi = " + Text(DonchianHi) + 
+			", DonchianLo = " + Text(DonchianLo) + 
+			", fsDonchianHi = " + Text(fsDonchianHi) + 
+			", fsDonchianLo = " + Text(fsDonchianLo) + 
+			", ExitLowestPrice = " + Text(ExitLowestPrice) + 
+			", ExitHighestPrice = " + Text(ExitHighestPrice) + 
+			", A_AccountID = " + A_AccountID() +
+			", A_TotalPosition = " + Text(A_TotalPosition()) +
+			", A_TotalAvgPrice = " + Text(A_TotalAvgPrice()) +
+			", A_GetOpenOrderCount = " + Text(A_GetOpenOrderCount()) +
+			", PreEntryPrice = " + Text(PreEntryPrice) +
+			", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False") +
+			", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False"));
+			
+		if (A_TotalPosition() == InvalidNumeric)
+		{
+			FileAppend(LogPath, "A_TotalPosition is InvalidNumeric");
+		}
+		if (A_TotalPosition() == 0)
+		{
+			NoPosition = True;
+		}
+		else if (A_TotalPosition() > 0)
+		{
+			LongPosition = True;
+		}
+		else if (A_TotalPosition() < 0)
+		{
+			ShortPosition = True;
+		}
+		Else
+		{
+			FileAppend(LogPath, "A_TotalPosition returns unexpected value = " + Text(A_TotalPosition()));
+		}
+		
+		If ( ExistOpenOrder )
+		{
+			for i = 1 to A_GetOpenOrderCount()
+			{
+				if (Enum_Buy() == A_OpenOrderBuyOrSell(i))
+				{
+					Temp = "BUY";
+				}
+				else If(Enum_Sell() == A_OpenOrderBuyOrSell(i))
+				{
+					Temp = "Sell";
+				}
+				FileAppend(LogPath, "HasOpenOrder" + text(i) +
+					", OrderSide = " + Temp +
+					", OpenOrderContractNo = " + A_OpenOrderContractNo(i) +
+					", OpenOrderTime = " + Text(A_OpenOrderTime(i)) +
+					", OpenOrderLot = " + Text(A_OpenOrderLot(i)) +
+					", OpenOrderPrice = " + Text(A_OpenOrderPrice(i)) );
+				if (Abs(Close - A_OpenOrderPrice(i)) > MaxSlippage)
+				{
+					DeleteOrderSuccess = A_DeleteOrder(A_OpenOrderContractNo(i));
+					FileAppend(LogPath, "DeleteOpenOrder" + text(i) +
+						", Result = " + IIFString(DeleteOrderSuccess,"True","False"));	
+				}
+			} 
+		}
+		
+		If(NoPosition && !ExistOpenOrder && ((!LastProfitableTradeFilter) Or (PreBreakoutFailure)))
+		{
+			If(High > DonchianHi && TurtleUnits >= 1)
+			{
+				myEntryPrice = Q_AskPrice();
+				PreEntryPrice = myEntryPrice;
+				A_SendOrder(Enum_Buy, Enum_Entry, TurtleUnits, myEntryPrice);
+				EntryNumber = 1;
+				Alert("BUY "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myEntryPrice)+", EntryTime = "+Text(EntryTime));
+				SendOrderThisBar = True;
+				PreBreakoutFailure = False;
+				FileAppend(LogPath, "ReadyToEntryLong" +
+					", myEntryPrice = " + Text(myEntryPrice) +
+					", EntryTimes = " + Text(EntryNumber) +
+					", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+					", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));			
+			}
+			If(Low < DonchianLo && TurtleUnits >= 1)
+			{
+				myEntryPrice = Q_BidPrice();
+				PreEntryPrice = myEntryPrice;
+				A_SendOrder(Enum_Sell, Enum_Entry, TurtleUnits, myEntryPrice);
+				EntryNumber = 1;
+				Alert("SELLSHORT "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myEntryPrice)+", EntryTime = "+Text(EntryTime));
+				SendOrderThisBar = True;
+				PreBreakoutFailure = False;
+				FileAppend(LogPath, "ReadyToEntryShort" +
+					", myEntryPrice = " + Text(myEntryPrice) +
+					", EntryTimes = " + Text(EntryNumber) +
+					", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+					", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+			}
+		}
+		If(NoPosition && !ExistOpenOrder )
+		{
+			If(High > fsDonchianHi && TurtleUnits >= 1)
+			{
+				myEntryPrice = Q_AskPrice();
+				PreEntryPrice = myEntryPrice;
+				A_SendOrder(Enum_Buy, Enum_Entry, TurtleUnits, myEntryPrice);
+				EntryNumber = 1;
+				Alert("BUY "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myEntryPrice)+", EntryTime = "+Text(EntryTime));
+				SendOrderThisBar = True;
+				PreBreakoutFailure = False;
+				FileAppend(LogPath, "ReadyToEntryLong" + Text(fsLength) +
+					", myEntryPrice = " + Text(myEntryPrice) +
+					", EntryTimes = " + Text(EntryNumber) +
+					", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+					", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+			}
+			If(Low < fsDonchianLo && TurtleUnits >= 1)
+			{
+				myEntryPrice = Q_BidPrice();
+				PreEntryPrice = myEntryPrice;
+				EntryNumber = 1;
+				A_SendOrder(Enum_Sell, Enum_Entry, TurtleUnits, myEntryPrice);
+				Alert("SELLSHORT "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myEntryPrice)+", EntryTime = "+Text(EntryTime));
+				SendOrderThisBar = True;
+				PreBreakoutFailure = False;
+				FileAppend(LogPath, "ReadyToEntryShort" + Text(fsLength) +
+					", myEntryPrice = " + Text(myEntryPrice) +
+					", EntryTimes = " + Text(EntryNumber) +
+					", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+					", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+			}
+		}
+		If(LongPosition && !ExistOpenOrder ) 
+		{       
+			If(Low <= PreEntryPrice - 2 * N && SendOrderThisBar == false) 
+			{
+				myExitPrice = Q_BidPrice();
+				A_SendOrder(Enum_Sell, Enum_Exit, Abs(A_TotalPosition()), myExitPrice);
+				EntryNumber = 0;
+				Alert("SELL "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myExitPrice)+", EntryTime = "+Text(EntryTime));
+				PreBreakoutFailure = True;
+				FileAppend(LogPath, "SellToStopLoss" +
+					", myExitPrice = " + Text(myExitPrice) +
+					", EntryTimes = " + Text(EntryNumber) +
+					", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+					", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+			}
+			Else If(Low < ExitLowestPrice)
+			{
+				myExitPrice = Q_BidPrice(); 
+				A_SendOrder(Enum_Sell, Enum_Exit, Abs(A_TotalPosition()), myExitPrice); 
+				AvgCostPrice = (PreEntryPrice - (EntryTime -1)/2 * 0.5* N);
+				if (myExitPrice < AvgCostPrice)
+				{
+					PreBreakoutFailure = True;
+				}
+				EntryNumber = 0;
+				Alert("SELL "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myExitPrice)+", EntryTime = "+Text(EntryTime));
+				FileAppend(LogPath, "SellToClosePos" +
+					", myExitPrice = " + Text(myExitPrice) +
+					", EntryTimes = " + Text(EntryNumber) +
+					", AvgCostPrice = " + Text(AvgCostPrice) +
+					", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+					", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+			}
+			Else
+			{
+				If(PreEntryPrice != InvalidNumeric && TurtleUnits >= 1)
+				{
+					If(High >= PreEntryPrice + 0.5 * N And EntryNumber < ReEntryLimit)
+					{
+						myEntryPrice = Q_AskPrice();
+						A_SendOrder(Enum_Buy, Enum_Entry, TurtleUnits, myEntryPrice); 
+						EntryNumber = EntryNumber + 1;
+						Alert("BUY "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myEntryPrice)+", EntryTime = "+Text(EntryTime));
+						SendOrderThisBar = True;
+						FileAppend(LogPath, "BuyToIncreasePos" +
+							", myEntryPrice = " + Text(myEntryPrice) +
+							", PreEntryPrice = " + Text(PreEntryPrice) +
+							", EntryTimes = " + Text(EntryNumber) +
+							", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+							", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+						PreEntryPrice = myEntryPrice;
+					}
+				}
+			}
+		}
+		Else If(ShortPosition && !ExistOpenOrder ) 
+		{     
+			If(High >= PreEntryPrice + 2 * N && SendOrderThisBar == false) 
+			{
+				myExitPrice = Q_AskPrice();
+				A_SendOrder(Enum_Buy, Enum_Exit, Abs(A_TotalPosition()), myExitPrice);
+				AvgCostPrice = (PreEntryPrice + (EntryTime -1)/2 * 0.5* N);
+				EntryNumber = 0;
+				Alert("BUYTOCOVER "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myEntryPrice)+", EntryTime = "+Text(EntryTime));
+				PreBreakoutFailure = True;
+				FileAppend(LogPath, "BuyToStopLoss" +
+					", myExitPrice = " + Text(myExitPrice) +
+					", EntryTimes = " + Text(EntryNumber) +
+					", AvgCostPrice = " + Text(AvgCostPrice) +
+					", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+					", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+			}
+			Else If(High > ExitHighestPrice)
+			{
+				myExitPrice = Q_AskPrice();
+				A_SendOrder(Enum_Sell, Enum_Exit, Abs(A_TotalPosition()), myExitPrice); 
+				if (myExitPrice > AvgCostPrice)
+				{
+					PreBreakoutFailure = True;
+				}
+				EntryNumber = 0;
+				BuyToCover(0,myExitPrice);   
+				Alert("BUYTOCOVER "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myEntryPrice)+", EntryTime = "+Text(EntryTime)); 
+				FileAppend(LogPath, "BuyToClosePos" +
+					", myExitPrice = " + Text(myExitPrice) +
+					", EntryTimes = " + Text(EntryNumber) +
+					", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+					", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+			}
+			Else
+			{
+				If(PreEntryPrice!=InvalidNumeric && TurtleUnits >= 1)
+				{
+					If(Low <= PreEntryPrice - 0.5*N && EntryNumber < ReEntryLimit) 
+					{
+						myEntryPrice = Q_BidPrice();
+						A_SendOrder(Enum_Sell, Enum_Entry, TurtleUnits, myEntryPrice); 
+						EntryNumber = EntryNumber + 1;
+						Alert("SELLSHORT "+SymbolName()+" "+Text(TurtleUnits)+" @ "+Text(myEntryPrice)+", EntryTime = "+Text(EntryTime));
+						SendOrderThisBar = True;
+						FileAppend(LogPath, "SellToIncreasePosWhenOpen" +
+							", myEntryPrice = " + Text(myEntryPrice) +
+							", PreEntryPrice = " + Text(PreEntryPrice) +
+							", EntryTimes = " + Text(EntryNumber) +
+							", SendOrderThisBar = " + IIFString(SendOrderThisBar,"True","False") +
+							", PreBreakoutFailure = " + IIFString(PreBreakoutFailure,"True","False"));	
+						PreEntryPrice = myEntryPrice;
+					}
+				}
+			}
+		}
+	}
+	SetTBProfileString2File(ParamPath, Symbol(), "PreEntryPrice", text(PreEntryPrice));
+	SetTBProfileString2File(ParamPath, Symbol(), "PreBreakoutFailure", IIFString(PreBreakoutFailure,"True","False"));
+	SetTBProfileString2File(ParamPath, Symbol(), "EntryNumber", text(EntryNumber));
+End
